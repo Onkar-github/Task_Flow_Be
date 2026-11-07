@@ -10,6 +10,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(5000),
 
   DATABASE_URL: z.url(),
+
+  SESSION_SECRET: z.string().min(32),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

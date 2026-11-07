@@ -8,6 +8,7 @@ import healthRouter from "./routes/health.routes.js";
 import databaseRouter from "./routes/database.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import { AppError } from "./utils/app-error.js";
+import { sessionMiddleware } from "./config/session.js";
 
 const app = express();
 
@@ -17,10 +18,14 @@ app.use(express.json({ limit: "1mb" }));
 // Parse URL-encoded requests.
 app.use(express.urlencoded({ extended: true }));
 
+// Session middleware must run before routes.
+app.use(sessionMiddleware);
+
 // Health check route.
 app.use("/api/v1/health", healthRouter);
 app.use("/api/v1/database", databaseRouter);
 app.use("/api/v1/auth", authRouter);
+
 
 // Handle unknown routes.
 const notFoundHandler: RequestHandler = (req, res) => {
