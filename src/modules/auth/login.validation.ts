@@ -5,8 +5,10 @@ export const loginSchema = z.object({
     .string()
     .trim()
     .max(254)
-    .pipe(z.email({ error: "Please provide a valid email address" }))
-    .transform((email) => email.toLowerCase()),
+    .toLowerCase()
+    .pipe(z.email({
+      error: "Please provide a valid email address",
+    })),
 
   password: z
     .string()

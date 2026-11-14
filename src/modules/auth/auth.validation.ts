@@ -8,9 +8,13 @@ export const registerSchema = z.object({
     .max(100, "Name cannot exceed 100 characters"),
 
 email: z
-    .email("Please provide a valid email address")
+    .string()
+    .trim()
     .max(254)
-    .transform((email) => email.trim().toLowerCase()),
+    .toLowerCase()
+    .pipe(z.email({
+      error: "Please provide a valid email address",
+    })),
 
   password: z
     .string()
