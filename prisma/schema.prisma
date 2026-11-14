@@ -14,27 +14,38 @@ enum WorkspaceRole {
   VIEWER
 }
 
+model Session {
+  sid    String   @id @db.VarChar
+  sess   Json
+  expire DateTime @db.Timestamp(6)
+
+  @@index([expire], map: "IDX_session_expire")
+  @@map("user_sessions")
+}
+
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String @id @default(uuid()) @db.Uuid
   name         String
-  email        String   @unique
+  email        String @unique
   passwordHash String
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  memberships  WorkspaceMember[]
+  memberships   WorkspaceMember[]
+  createdBoards Board[]           @relation("BoardCreator")
 }
 
 model Workspace {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String
-  slug        String   @unique
+  id   String @id @default(uuid()) @db.Uuid
+  name String
+  slug String @unique
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  members     WorkspaceMember[]
+  members WorkspaceMember[]
+  boards  Board[]
 }
 
 model WorkspaceMember {
@@ -43,11 +54,32 @@ model WorkspaceMember {
   workspaceId String        @db.Uuid
   role        WorkspaceRole @default(MEMBER)
 
-  joinedAt    DateTime      @default(now())
+  joinedAt DateTime @default(now())
 
-  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict)
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@unique([userId, workspaceId])
   @@index([workspaceId, role])
+}
+
+model Board {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+
+  workspaceId String @db.Uuid
+  createdById String @db.Uuid
+
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  createdBy User @relation("BoardCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, archivedAt])
+  @@index([createdById])
 }
