@@ -8,6 +8,7 @@ import healthRouter from "./routes/health.routes.js";
 import databaseRouter from "./routes/database.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import workspaceRouter from "./modules/workspace/workspace.routes.js";
+import boardRouter from "./modules/board/board.routes.js";
 import { AppError } from "./utils/app-error.js";
 import { sessionMiddleware } from "./config/session.js";
 
@@ -27,6 +28,7 @@ app.use("/api/v1/health", healthRouter);
 app.use("/api/v1/database", databaseRouter);
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/workspaces", workspaceRouter);
+app.use("/api/v1", boardRouter);
 
 
 // Handle unknown routes.
