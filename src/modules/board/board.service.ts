@@ -13,6 +13,7 @@ const VIEW_ROLES = ["OWNER", "ADMIN", "MEMBER", "VIEWER"] as const;
 const MANAGE_ROLES = ["OWNER", "ADMIN"] as const;
 
 // 1. Create board
+
 export const createBoard = async (
   workspaceId: string,
   userId: string,
@@ -33,6 +34,14 @@ export const createBoard = async (
           description: input.description,
           workspaceId,
           createdById: userId,
+
+          columns: {
+            create: [
+              { name: "To Do", position: 0 },
+              { name: "In Progress", position: 1 },
+              { name: "Done", position: 2 },
+            ],
+          },
         },
         select: {
           id: true,
@@ -43,18 +52,30 @@ export const createBoard = async (
           archivedAt: true,
           createdAt: true,
           updatedAt: true,
+          columns: {
+            orderBy: {
+              position: "asc",
+            },
+            select: {
+              id: true,
+              name: true,
+              position: true,
+            },
+          },
         },
       });
     } catch (error) {
       handlePrismaError(error, {
         P2002: {
-          message: "A board with this name already exists in this workspace",
+          message:
+            "A board with this name already exists in this workspace",
           statusCode: 409,
         },
       });
     }
   });
 };
+
 
 // 2. List active boards
 export const getWorkspaceBoards = async (
@@ -151,39 +172,39 @@ export const updateBoard = async (
       MANAGE_ROLES,
     );
 
-  try {
-        return await tx.board.update({
-          where: {
-            id: boardId,
-            workspaceId,
-            archivedAt: null,
-          },
-          data: {
-            ...input,
-          },
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            workspaceId: true,
-            createdById: true,
-            archivedAt: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        });
-  }catch (error) {
-  handlePrismaError(error, {
-    P2002: {
-      message: "A board with this name already exists in this workspace",
-      statusCode: 409,
-    },
-    P2025: {
-      message: "Board not found",
-      statusCode: 404,
-    },
-  });
-}
+    try {
+      return await tx.board.update({
+        where: {
+          id: boardId,
+          workspaceId,
+          archivedAt: null,
+        },
+        data: {
+          ...input,
+        },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          workspaceId: true,
+          createdById: true,
+          archivedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+    } catch (error) {
+      handlePrismaError(error, {
+        P2002: {
+          message: "A board with this name already exists in this workspace",
+          statusCode: 409,
+        },
+        P2025: {
+          message: "Board not found",
+          statusCode: 404,
+        },
+      });
+    }
 
   });
 };
@@ -295,34 +316,47 @@ export const deleteBoard = async (
   userId: string,
 ) => {
   return prisma.$transaction(async (tx) => {
-    await requireWorkspaceRole(
-      tx,
-      userId,
-      workspaceId,
-      ["OWNER"],
-    );
+    // Only the workspace Owner can permanently delete a board.
+    await requireWorkspaceRole(tx, userId, workspaceId, ["OWNER"]);
 
-    const board = await tx.board.findFirst({
-      where: {
-        id: boardId,
-        workspaceId,
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
+    // Lock the board row so task/column mutations cannot race with deletion.
+    const rows = await tx.$queryRaw<Array<{
+      id: string;
+      name: string;
+      archivedAt: Date | null;
+    }>>`
+      SELECT "id", "name", "archivedAt"
+      FROM "Board"
+      WHERE "id" = ${boardId}::uuid
+        AND "workspaceId" = ${workspaceId}::uuid
+      FOR UPDATE
+    `;
 
+    const board = rows[0];
     if (!board) {
       throw new AppError("Board not found", 404);
     }
 
-    await tx.board.delete({
-      where: {
-        id: boardId,
+    if (!board.archivedAt) {
+      throw new AppError(
+        "Board must be archived before it can be permanently deleted",
+        409,
+      );
+    }
+
+    // Explicit deletion order is required because all dependent relations use Restrict.
+    await tx.task.deleteMany({ where: { boardId } });
+    await tx.boardColumn.deleteMany({ where: { boardId } });
+
+    return tx.board.delete({
+      where: { id: boardId },
+      select: {
+        id: true,
+        name: true,
+        workspaceId: true,
       },
     });
-
-    return board;
   });
 };
+
+

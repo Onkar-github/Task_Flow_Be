@@ -9,8 +9,11 @@ import databaseRouter from "./routes/database.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import workspaceRouter from "./modules/workspace/workspace.routes.js";
 import boardRouter from "./modules/board/board.routes.js";
+import columnRouter from "./modules/column/column.routes.js";
+import taskRouter from "./modules/task/task.routes.js";
 import { AppError } from "./utils/app-error.js";
 import { sessionMiddleware } from "./config/session.js";
+import { ZodError } from "zod";
 
 const app = express();
 
@@ -29,7 +32,8 @@ app.use("/api/v1/database", databaseRouter);
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/workspaces", workspaceRouter);
 app.use("/api/v1", boardRouter);
-
+app.use("/api/v1", columnRouter);
+app.use("/api/v1", taskRouter);
 
 // Handle unknown routes.
 const notFoundHandler: RequestHandler = (req, res) => {
@@ -55,6 +59,28 @@ const errorHandler: ErrorRequestHandler = (
     });
 
     return;
+  }
+
+  if (error instanceof ZodError) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors: error.issues.map((issue) => ({
+        field: issue.path.join("."),
+        message: issue.message,
+      })),
+    });
+  }
+
+  if (error instanceof SyntaxError &&
+    "status" in error && error.status === 400 &&
+    "type" in error && error.type === "entity.parse.failed"
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid JSON request body",
+    });
+
   }
 
   console.error("Unhandled application error:", error);

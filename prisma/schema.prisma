@@ -14,6 +14,13 @@ enum WorkspaceRole {
   VIEWER
 }
 
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
 model Session {
   sid    String   @id @db.VarChar
   sess   Json
@@ -34,6 +41,8 @@ model User {
 
   memberships   WorkspaceMember[]
   createdBoards Board[]           @relation("BoardCreator")
+  createdTasks  Task[]            @relation("TaskCreator")
+  assignedTasks Task[]            @relation("TaskAssignee")
 }
 
 model Workspace {
@@ -76,10 +85,57 @@ model Board {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-
-  createdBy User @relation("BoardCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy User          @relation("BoardCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  columns   BoardColumn[]
+  tasks     Task[]
 
   @@index([workspaceId, archivedAt])
   @@index([createdById])
+}
+
+model BoardColumn {
+  id       String @id @default(uuid()) @db.Uuid
+  name     String
+  position Int    @default(0)
+
+  boardId String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Restrict)
+  tasks Task[]
+
+  // Required as the target of Task's composite (columnId, boardId) foreign key.
+  @@unique([id, boardId], map: "BoardColumn_id_boardId_key")
+  @@index([boardId, position])
+}
+
+model Task {
+  id          String       @id @default(uuid()) @db.Uuid
+  title       String
+  description String?
+  priority    TaskPriority @default(MEDIUM)
+  position    Int          @default(0)
+
+  boardId     String  @db.Uuid
+  columnId    String  @db.Uuid
+  assigneeId  String? @db.Uuid
+  createdById String  @db.Uuid
+
+  dueDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  board     Board       @relation(fields: [boardId], references: [id], onDelete: Restrict)
+  column    BoardColumn @relation(fields: [columnId, boardId], references: [id, boardId], onDelete: Restrict)
+  assignee  User?       @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  createdBy User        @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([boardId, columnId])
+  @@index([columnId, position])
+  @@index([assigneeId])
+  @@index([createdById])
+  @@index([dueDate])
 }
