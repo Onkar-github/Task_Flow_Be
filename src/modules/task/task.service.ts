@@ -120,7 +120,7 @@ export const createTask = async (
   userId: string,
   input: CreateTaskInput,
 ) => {
-  return prisma.$transaction(async (tx) => {
+  const createdTaskId = await prisma.$transaction(async (tx) => {
     await requireBoardRole(tx, workspaceId, boardId, userId, TASK_WRITE_ROLES, true);
     await ensureColumnBelongsToBoard(tx, boardId, input.columnId);
 
@@ -134,7 +134,7 @@ export const createTask = async (
     });
     const position = (lastTask._max.position ?? -1) + 1;
 
-    return tx.task.create({
+    const createdTask = await tx.task.create({
       data: {
         title: input.title,
         description: input.description ?? null,
@@ -146,27 +146,41 @@ export const createTask = async (
         assigneeId: input.assigneeId ?? null,
         dueDate: input.dueDate ? new Date(input.dueDate) : null,
       },
-      include: taskInclude,
+      select: { id: true },
     });
+
+    return createdTask.id;
   });
+
+  // Load relations after the transaction has committed. This avoids relation
+  // loading on the interactive transaction's single PostgreSQL connection.
+  const task = await prisma.task.findUnique({
+    where: { id: createdTaskId },
+    include: taskInclude,
+  });
+  if (!task) throw new AppError("Task not found", 404);
+  return task;
 };
 
 export const getBoardTasks = async (
   workspaceId: string,
   boardId: string,
   userId: string,
+  columnId?: string,
 ) => {
-  return prisma.$transaction(async (tx) => {
+  // Keep authorization and active-board checks together, but perform relation
+  // loading after the transaction to avoid pg adapter query overlap warnings.
+  await prisma.$transaction(async (tx) => {
     await requireBoardRole(tx, workspaceId, boardId, userId, VIEW_ROLES);
-    return tx.task.findMany({
-      where: { boardId },
-      orderBy: [
-        { column: { position: "asc" } },
-        { position: "asc" },
-        { createdAt: "asc" },
-      ],
-      include: taskInclude,
-    });
+  });
+
+  return prisma.task.findMany({
+    where: { boardId, ...(columnId ? { columnId } : {}) },
+    orderBy: [
+      { columnId: "asc" },
+      { position: "asc" },
+    ],
+    include: taskInclude,
   });
 };
 
@@ -176,15 +190,22 @@ export const getTaskById = async (
   taskId: string,
   userId: string,
 ) => {
-  return prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     await requireBoardRole(tx, workspaceId, boardId, userId, VIEW_ROLES);
+
     const task = await tx.task.findFirst({
       where: { id: taskId, boardId },
-      include: taskInclude,
+      select: { id: true },
     });
     if (!task) throw new AppError("Task not found", 404);
-    return task;
   });
+
+  const task = await prisma.task.findFirst({
+    where: { id: taskId, boardId },
+    include: taskInclude,
+  });
+  if (!task) throw new AppError("Task not found", 404);
+  return task;
 };
 
 export const updateTask = async (
@@ -194,7 +215,7 @@ export const updateTask = async (
   userId: string,
   input: UpdateTaskInput,
 ) => {
-  return prisma.$transaction(async (tx) => {
+  const updatedTaskId = await prisma.$transaction(async (tx) => {
     await requireBoardRole(tx, workspaceId, boardId, userId, TASK_WRITE_ROLES, true);
 
     const existingTask = await tx.task.findFirst({
@@ -220,12 +241,21 @@ export const updateTask = async (
         : { connect: { id: input.assigneeId } };
     }
 
-    return tx.task.update({
+    const updatedTask = await tx.task.update({
       where: { id: taskId },
       data,
-      include: taskInclude,
+      select: { id: true },
     });
+
+    return updatedTask.id;
   });
+
+  const task = await prisma.task.findUnique({
+    where: { id: updatedTaskId },
+    include: taskInclude,
+  });
+  if (!task) throw new AppError("Task not found", 404);
+  return task;
 };
 
 export const deleteTask = async (
@@ -259,7 +289,7 @@ export const moveTask = async (
   userId: string,
   input: MoveTaskInput,
 ) => {
-  return prisma.$transaction(async (tx) => {
+  const movedTaskId = await prisma.$transaction(async (tx) => {
     await requireBoardRole(tx, workspaceId, boardId, userId, TASK_WRITE_ROLES, true);
     await ensureColumnBelongsToBoard(tx, boardId, input.targetColumnId);
 
@@ -311,11 +341,15 @@ export const moveTask = async (
       });
     }
 
-    return tx.task.findUniqueOrThrow({
-      where: { id: taskId },
-      include: taskInclude,
-    });
+    return taskId;
   });
+
+  const task = await prisma.task.findUnique({
+    where: { id: movedTaskId },
+    include: taskInclude,
+  });
+  if (!task) throw new AppError("Task not found", 404);
+  return task;
 };
 
 export const reorderTasks = async (
@@ -325,7 +359,7 @@ export const reorderTasks = async (
   userId: string,
   input: ReorderTasksInput,
 ) => {
-  return prisma.$transaction(async (tx) => {
+  const reorderedTaskIds = await prisma.$transaction(async (tx) => {
     await requireBoardRole(tx, workspaceId, boardId, userId, TASK_WRITE_ROLES, true);
     await ensureColumnBelongsToBoard(tx, boardId, columnId);
 
@@ -350,10 +384,24 @@ export const reorderTasks = async (
       await tx.task.update({ where: { id }, data: { position } });
     }
 
-    return tx.task.findMany({
-      where: { boardId, columnId },
-      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-      include: taskInclude,
-    });
+    return input.taskIds;
+  });
+
+  if (reorderedTaskIds.length === 0) return [];
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      boardId,
+      columnId,
+      id: { in: reorderedTaskIds },
+    },
+    include: taskInclude,
+  });
+
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
+  return reorderedTaskIds.map((id) => {
+    const task = tasksById.get(id);
+    if (!task) throw new AppError("Task not found after reordering", 404);
+    return task;
   });
 };

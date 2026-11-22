@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express";
+import { z } from "zod";
 import { AppError } from "../../utils/app-error.js";
 import {
   createTaskSchema,
@@ -31,6 +32,10 @@ const getUserId = (userId: string | undefined): string => {
   return userId;
 };
 
+const taskQuerySchema = z.object({
+  columnId: z.uuid().optional(),
+});
+
 export const createTaskController: RequestHandler = async (req, res) => {
   const workspaceId = getRouteParam(req.params.workspaceId, "workspace ID");
   const boardId = getRouteParam(req.params.boardId, "board ID");
@@ -49,8 +54,9 @@ export const getBoardTasksController: RequestHandler = async (req, res) => {
   const workspaceId = getRouteParam(req.params.workspaceId, "workspace ID");
   const boardId = getRouteParam(req.params.boardId, "board ID");
   const userId = getUserId(req.session.userId);
+  const { columnId } = taskQuerySchema.parse(req.query);
 
-  const tasks = await getBoardTasks(workspaceId, boardId, userId);
+  const tasks = await getBoardTasks(workspaceId, boardId, userId, columnId);
   res.status(200).json({ success: true, data: tasks });
 };
 
